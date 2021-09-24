@@ -5,11 +5,10 @@ import (
 	"net/http"
 
 	"github.com/MakeNowJust/heredoc"
-	"github.com/cli/cli/git"
-	"github.com/cli/cli/internal/config"
-	"github.com/cli/cli/internal/ghinstance"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/iostreams"
+	"github.com/cli/cli/v2/git"
+	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -76,7 +75,10 @@ func cloneRun(opts *CloneOptions) error {
 		if err != nil {
 			return err
 		}
-		hostname := ghinstance.OverridableDefault()
+		hostname, err := cfg.DefaultHost()
+		if err != nil {
+			return err
+		}
 		protocol, err := cfg.Get(hostname, "git_protocol")
 		if err != nil {
 			return err

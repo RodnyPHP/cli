@@ -2,14 +2,13 @@ package refresh
 
 import (
 	"bytes"
-	"regexp"
 	"testing"
 
-	"github.com/cli/cli/internal/config"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/httpmock"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/pkg/prompt"
+	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/httpmock"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/prompt"
 	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 )
@@ -89,7 +88,8 @@ func Test_NewCmdRefresh(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			io, _, _, _ := iostreams.Test()
 			f := &cmdutil.Factory{
-				IOStreams: io,
+				IOStreams:  io,
+				Executable: func() string { return "/path/to/gh" },
 			}
 			io.SetStdinTTY(tt.tty)
 			io.SetStdoutTTY(tt.tty)
@@ -134,14 +134,14 @@ func Test_refreshRun(t *testing.T) {
 		opts         *RefreshOptions
 		askStubs     func(*prompt.AskStubber)
 		cfgHosts     []string
-		wantErr      *regexp.Regexp
+		wantErr      string
 		nontty       bool
 		wantAuthArgs authArgs
 	}{
 		{
 			name:    "no hosts configured",
 			opts:    &RefreshOptions{},
-			wantErr: regexp.MustCompile(`not logged in to any hosts`),
+			wantErr: `not logged in to any hosts`,
 		},
 		{
 			name: "hostname given but dne",
@@ -152,7 +152,7 @@ func Test_refreshRun(t *testing.T) {
 			opts: &RefreshOptions{
 				Hostname: "obed.morton",
 			},
-			wantErr: regexp.MustCompile(`not logged in to obed.morton`),
+			wantErr: `not logged in to obed.morton`,
 		},
 		{
 			name: "hostname provided and is configured",
@@ -250,14 +250,12 @@ func Test_refreshRun(t *testing.T) {
 			}
 
 			err := refreshRun(tt.opts)
-			assert.Equal(t, tt.wantErr == nil, err == nil)
-			if err != nil {
-				if tt.wantErr != nil {
-					assert.True(t, tt.wantErr.MatchString(err.Error()))
-					return
-				} else {
-					t.Fatalf("unexpected error: %s", err)
+			if tt.wantErr != "" {
+				if assert.Error(t, err) {
+					assert.Contains(t, err.Error(), tt.wantErr)
 				}
+			} else {
+				assert.NoError(t, err)
 			}
 
 			assert.Equal(t, aa.hostname, tt.wantAuthArgs.hostname)

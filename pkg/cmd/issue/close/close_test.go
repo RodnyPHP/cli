@@ -7,13 +7,14 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/cli/cli/internal/config"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/httpmock"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/test"
+	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/httpmock"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/test"
 	"github.com/google/shlex"
+	"github.com/stretchr/testify/assert"
 )
 
 func runCommand(rt http.RoundTripper, isTTY bool, cli string) (*test.CmdOut, error) {
@@ -58,14 +59,21 @@ func TestIssueClose(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	http.StubResponse(200, bytes.NewBufferString(`
-	{ "data": { "repository": {
-		"hasIssuesEnabled": true,
-		"issue": { "number": 13, "title": "The title of the issue"}
-	} } }
-	`))
-
-	http.StubResponse(200, bytes.NewBufferString(`{"id": "THE-ID"}`))
+	http.Register(
+		httpmock.GraphQL(`query IssueByNumber\b`),
+		httpmock.StringResponse(`
+			{ "data": { "repository": {
+				"hasIssuesEnabled": true,
+				"issue": { "id": "THE-ID", "number": 13, "title": "The title of the issue"}
+			} } }`),
+	)
+	http.Register(
+		httpmock.GraphQL(`mutation IssueClose\b`),
+		httpmock.GraphQLMutation(`{"id": "THE-ID"}`,
+			func(inputs map[string]interface{}) {
+				assert.Equal(t, inputs["issueId"], "THE-ID")
+			}),
+	)
 
 	output, err := runCommand(http, true, "13")
 	if err != nil {
@@ -83,12 +91,14 @@ func TestIssueClose_alreadyClosed(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	http.StubResponse(200, bytes.NewBufferString(`
-	{ "data": { "repository": {
-		"hasIssuesEnabled": true,
-		"issue": { "number": 13, "title": "The title of the issue", "closed": true}
-	} } }
-	`))
+	http.Register(
+		httpmock.GraphQL(`query IssueByNumber\b`),
+		httpmock.StringResponse(`
+			{ "data": { "repository": {
+				"hasIssuesEnabled": true,
+				"issue": { "number": 13, "title": "The title of the issue", "state": "CLOSED"}
+			} } }`),
+	)
 
 	output, err := runCommand(http, true, "13")
 	if err != nil {
@@ -106,11 +116,13 @@ func TestIssueClose_issuesDisabled(t *testing.T) {
 	http := &httpmock.Registry{}
 	defer http.Verify(t)
 
-	http.StubResponse(200, bytes.NewBufferString(`
-	{ "data": { "repository": {
-		"hasIssuesEnabled": false
-	} } }
-	`))
+	http.Register(
+		httpmock.GraphQL(`query IssueByNumber\b`),
+		httpmock.StringResponse(`
+			{ "data": { "repository": {
+				"hasIssuesEnabled": false
+			} } }`),
+	)
 
 	_, err := runCommand(http, true, "13")
 	if err == nil || err.Error() != "the 'OWNER/REPO' repository has disabled issues" {

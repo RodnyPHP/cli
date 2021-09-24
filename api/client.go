@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/cli/cli/internal/ghinstance"
+	"github.com/cli/cli/v2/internal/ghinstance"
 	"github.com/henvic/httpretty"
 	"github.com/shurcooL/graphql"
 )
@@ -111,6 +111,10 @@ type Client struct {
 	http *http.Client
 }
 
+func (c *Client) HTTP() *http.Client {
+	return c.http
+}
+
 type graphQLResponse struct {
 	Data   interface{}
 	Errors []GraphQLError
@@ -119,8 +123,8 @@ type graphQLResponse struct {
 // GraphQLError is a single error returned in a GraphQL response
 type GraphQLError struct {
 	Type    string
-	Path    []string
 	Message string
+	// Path []interface // mixed strings and numbers
 }
 
 // GraphQLErrorResponse contains errors returned in a GraphQL response
@@ -142,6 +146,14 @@ type HTTPError struct {
 	RequestURL  *url.URL
 	Message     string
 	OAuthScopes string
+	Errors      []HTTPErrorItem
+}
+
+type HTTPErrorItem struct {
+	Message  string
+	Resource string
+	Field    string
+	Code     string
 }
 
 func (err HTTPError) Error() string {
@@ -151,79 +163,6 @@ func (err HTTPError) Error() string {
 		return fmt.Sprintf("HTTP %d: %s (%s)", err.StatusCode, err.Message, err.RequestURL)
 	}
 	return fmt.Sprintf("HTTP %d (%s)", err.StatusCode, err.RequestURL)
-}
-
-type MissingScopesError struct {
-	MissingScopes []string
-}
-
-func (e MissingScopesError) Error() string {
-	var missing []string
-	for _, s := range e.MissingScopes {
-		missing = append(missing, fmt.Sprintf("'%s'", s))
-	}
-	scopes := strings.Join(missing, ", ")
-
-	if len(e.MissingScopes) == 1 {
-		return "missing required scope " + scopes
-	}
-	return "missing required scopes " + scopes
-}
-
-func (c Client) HasMinimumScopes(hostname string) error {
-	apiEndpoint := ghinstance.RESTPrefix(hostname)
-
-	req, err := http.NewRequest("GET", apiEndpoint, nil)
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	res, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		// Ensure the response body is fully read and closed
-		// before we reconnect, so that we reuse the same TCPconnection.
-		_, _ = io.Copy(ioutil.Discard, res.Body)
-		res.Body.Close()
-	}()
-
-	if res.StatusCode != 200 {
-		return HandleHTTPError(res)
-	}
-
-	scopesHeader := res.Header.Get("X-Oauth-Scopes")
-	if scopesHeader == "" {
-		// if the token reports no scopes, assume that it's an integration token and give up on
-		// detecting its capabilities
-		return nil
-	}
-
-	search := map[string]bool{
-		"repo":      false,
-		"read:org":  false,
-		"admin:org": false,
-	}
-	for _, s := range strings.Split(scopesHeader, ",") {
-		search[strings.TrimSpace(s)] = true
-	}
-
-	var missingScopes []string
-	if !search["repo"] {
-		missingScopes = append(missingScopes, "repo")
-	}
-
-	if !search["read:org"] && !search["admin:org"] {
-		missingScopes = append(missingScopes, "read:org")
-	}
-
-	if len(missingScopes) > 0 {
-		return &MissingScopesError{MissingScopes: missingScopes}
-	}
-	return nil
 }
 
 // GraphQL performs a GraphQL request and parses the response
@@ -255,8 +194,7 @@ func graphQLClient(h *http.Client, hostname string) *graphql.Client {
 
 // REST performs a REST request and parses the response.
 func (c Client) REST(hostname string, method string, p string, body io.Reader, data interface{}) error {
-	url := ghinstance.RESTPrefix(hostname) + p
-	req, err := http.NewRequest(method, url, body)
+	req, err := http.NewRequest(method, restURL(hostname, p), body)
 	if err != nil {
 		return err
 	}
@@ -282,13 +220,19 @@ func (c Client) REST(hostname string, method string, p string, body io.Reader, d
 	if err != nil {
 		return err
 	}
-
 	err = json.Unmarshal(b, &data)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func restURL(hostname string, pathOrURL string) string {
+	if strings.HasPrefix(pathOrURL, "https://") || strings.HasPrefix(pathOrURL, "http://") {
+		return pathOrURL
+	}
+	return ghinstance.RESTPrefix(hostname) + pathOrURL
 }
 
 func handleResponse(resp *http.Response, data interface{}) error {
@@ -341,30 +285,28 @@ func HandleHTTPError(resp *http.Response) error {
 		return httpError
 	}
 
-	type errorObject struct {
-		Message  string
-		Resource string
-		Field    string
-		Code     string
+	var messages []string
+	if parsedBody.Message != "" {
+		messages = append(messages, parsedBody.Message)
 	}
-
-	messages := []string{parsedBody.Message}
 	for _, raw := range parsedBody.Errors {
 		switch raw[0] {
 		case '"':
 			var errString string
 			_ = json.Unmarshal(raw, &errString)
 			messages = append(messages, errString)
+			httpError.Errors = append(httpError.Errors, HTTPErrorItem{Message: errString})
 		case '{':
-			var errInfo errorObject
+			var errInfo HTTPErrorItem
 			_ = json.Unmarshal(raw, &errInfo)
 			msg := errInfo.Message
-			if errInfo.Code != "custom" {
+			if errInfo.Code != "" && errInfo.Code != "custom" {
 				msg = fmt.Sprintf("%s.%s %s", errInfo.Resource, errInfo.Field, errorCodeToMessage(errInfo.Code))
 			}
 			if msg != "" {
 				messages = append(messages, msg)
 			}
+			httpError.Errors = append(httpError.Errors, errInfo)
 		}
 	}
 	httpError.Message = strings.Join(messages, "\n")

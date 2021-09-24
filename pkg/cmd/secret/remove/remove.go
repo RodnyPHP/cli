@@ -4,36 +4,44 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghinstance"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/iostreams"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/spf13/cobra"
 )
 
 type RemoveOptions struct {
 	HttpClient func() (*http.Client, error)
 	IO         *iostreams.IOStreams
+	Config     func() (config.Config, error)
 	BaseRepo   func() (ghrepo.Interface, error)
 
 	SecretName string
 	OrgName    string
+	EnvName    string
 }
 
 func NewCmdRemove(f *cmdutil.Factory, runF func(*RemoveOptions) error) *cobra.Command {
 	opts := &RemoveOptions{
 		IO:         f.IOStreams,
+		Config:     f.Config,
 		HttpClient: f.HttpClient,
 	}
 
 	cmd := &cobra.Command{
 		Use:   "remove <secret-name>",
-		Short: "Remove an organization or repository secret",
+		Short: "Remove secrets",
+		Long:  "Remove a secret for a repository, environment, or organization",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// support `-R, --repo` override
 			opts.BaseRepo = f.BaseRepo
+
+			if err := cmdutil.MutuallyExclusive("specify only one of `--org` or `--env`", opts.OrgName != "", opts.EnvName != ""); err != nil {
+				return err
+			}
 
 			opts.SecretName = args[0]
 
@@ -44,7 +52,8 @@ func NewCmdRemove(f *cmdutil.Factory, runF func(*RemoveOptions) error) *cobra.Co
 			return removeRun(opts)
 		},
 	}
-	cmd.Flags().StringVarP(&opts.OrgName, "org", "o", "", "List secrets for an organization")
+	cmd.Flags().StringVarP(&opts.OrgName, "org", "o", "", "Remove a secret for an organization")
+	cmd.Flags().StringVarP(&opts.EnvName, "env", "e", "", "Remove a secret for an environment")
 
 	return cmd
 }
@@ -57,6 +66,7 @@ func removeRun(opts *RemoveOptions) error {
 	client := api.NewClientFromHTTP(c)
 
 	orgName := opts.OrgName
+	envName := opts.EnvName
 
 	var baseRepo ghrepo.Interface
 	if orgName == "" {
@@ -67,26 +77,39 @@ func removeRun(opts *RemoveOptions) error {
 	}
 
 	var path string
-	if orgName == "" {
-		path = fmt.Sprintf("repos/%s/actions/secrets/%s", ghrepo.FullName(baseRepo), opts.SecretName)
-	} else {
+	if orgName != "" {
 		path = fmt.Sprintf("orgs/%s/actions/secrets/%s", orgName, opts.SecretName)
+	} else if envName != "" {
+		path = fmt.Sprintf("repos/%s/environments/%s/secrets/%s", ghrepo.FullName(baseRepo), envName, opts.SecretName)
+	} else {
+		path = fmt.Sprintf("repos/%s/actions/secrets/%s", ghrepo.FullName(baseRepo), opts.SecretName)
 	}
 
-	host := ghinstance.OverridableDefault()
+	cfg, err := opts.Config()
+	if err != nil {
+		return err
+	}
+
+	host, err := cfg.DefaultHost()
+	if err != nil {
+		return err
+	}
+
 	err = client.REST(host, "DELETE", path, nil, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete secret %s: %w", opts.SecretName, err)
 	}
 
 	if opts.IO.IsStdoutTTY() {
-		cs := opts.IO.ColorScheme()
+		target := orgName
 		if orgName == "" {
-			fmt.Fprintf(opts.IO.Out,
-				"%s Removed secret %s from %s\n", cs.SuccessIcon(), opts.SecretName, ghrepo.FullName(baseRepo))
+			target = ghrepo.FullName(baseRepo)
+		}
+		cs := opts.IO.ColorScheme()
+		if envName != "" {
+			fmt.Fprintf(opts.IO.Out, "%s Removed secret %s from %s environment on %s\n", cs.SuccessIconWithColor(cs.Red), opts.SecretName, envName, target)
 		} else {
-			fmt.Fprintf(opts.IO.Out,
-				"%s Removed secret %s from %s\n", cs.SuccessIcon(), opts.SecretName, orgName)
+			fmt.Fprintf(opts.IO.Out, "%s Removed secret %s from %s\n", cs.SuccessIconWithColor(cs.Red), opts.SecretName, target)
 		}
 	}
 

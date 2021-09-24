@@ -5,11 +5,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cli/cli/internal/config"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/httpmock"
-	"github.com/cli/cli/pkg/iostreams"
-	"github.com/cli/cli/test"
+	"github.com/cli/cli/v2/internal/config"
+	"github.com/cli/cli/v2/internal/run"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/httpmock"
+	"github.com/cli/cli/v2/pkg/iostreams"
+	"github.com/cli/cli/v2/test"
 	"github.com/google/shlex"
 	"github.com/stretchr/testify/assert"
 )
@@ -88,13 +89,15 @@ func Test_GistClone(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := &httpmock.Registry{}
+			defer reg.Verify(t)
 
 			httpClient := &http.Client{Transport: reg}
 
-			cs, restore := test.InitCmdStubber()
-			defer restore()
-
-			cs.Stub("") // git clone
+			cs, restore := run.Stub()
+			defer restore(t)
+			cs.Register(`git clone`, 0, "", func(s []string) {
+				assert.Equal(t, tt.want, strings.Join(s, " "))
+			})
 
 			output, err := runCloneCommand(httpClient, tt.args)
 			if err != nil {
@@ -103,9 +106,6 @@ func Test_GistClone(t *testing.T) {
 
 			assert.Equal(t, "", output.String())
 			assert.Equal(t, "", output.Stderr())
-			assert.Equal(t, 1, cs.Count)
-			assert.Equal(t, tt.want, strings.Join(cs.Calls[0].Args, " "))
-			reg.Verify(t)
 		})
 	}
 }

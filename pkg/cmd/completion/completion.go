@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/MakeNowJust/heredoc"
-	"github.com/cli/cli/pkg/cmdutil"
-	"github.com/cli/cli/pkg/iostreams"
+	"github.com/cli/cli/v2/pkg/cmdutil"
+	"github.com/cli/cli/v2/pkg/iostreams"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +21,7 @@ func NewCmdCompletion(io *iostreams.IOStreams) *cobra.Command {
 
 			When installing GitHub CLI through a package manager, it's possible that
 			no additional shell configuration is necessary to gain completion support. For
-			Homebrew, see https://docs.brew.sh/Shell-Completion
+			Homebrew, see <https://docs.brew.sh/Shell-Completion>
 
 			If you need to set up completions manually, follow the instructions below. The exact
 			config file locations might vary based on your system. Make sure to restart your
@@ -29,7 +29,9 @@ func NewCmdCompletion(io *iostreams.IOStreams) *cobra.Command {
 
 			### bash
 
-			Add this to your %[1]s~/.bash_profile%[1]s:
+			First, ensure that you install %[1]sbash-completion%[1]s using your package manager.
+
+			After, add this to your %[1]s~/.bash_profile%[1]s:
 
 				eval "$(gh completion -s bash)"
 			
@@ -51,6 +53,17 @@ func NewCmdCompletion(io *iostreams.IOStreams) *cobra.Command {
 			Generate a %[1]sgh.fish%[1]s completion script:
 
 				gh completion -s fish > ~/.config/fish/completions/gh.fish
+
+			### PowerShell
+
+			Open your profile script with:
+
+				mkdir -Path (Split-Path -Parent $profile) -ErrorAction SilentlyContinue
+				notepad $profile
+			
+			Add the line and save the file:
+
+				Invoke-Expression -Command $(gh completion -s powershell | Out-String)
 		`, "`"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if shellType == "" {
@@ -65,11 +78,11 @@ func NewCmdCompletion(io *iostreams.IOStreams) *cobra.Command {
 
 			switch shellType {
 			case "bash":
-				return rootCmd.GenBashCompletion(w)
+				return rootCmd.GenBashCompletionV2(w, true)
 			case "zsh":
 				return rootCmd.GenZshCompletion(w)
 			case "powershell":
-				return rootCmd.GenPowerShellCompletion(w)
+				return rootCmd.GenPowerShellCompletionWithDesc(w)
 			case "fish":
 				return rootCmd.GenFishCompletion(w, true)
 			default:

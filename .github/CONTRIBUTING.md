@@ -23,14 +23,19 @@ Please avoid:
 ## Building the project
 
 Prerequisites:
-- Go 1.13+ for building the binary
-- Go 1.15+ for running the test suite
+- Go 1.16+
 
-Build with: `make` or `go build -o bin/gh ./cmd/gh`
+Build with:
+* Unix-like systems: `make`
+* Windows: `go run script/build.go`
 
-Run the new binary as: `./bin/gh`
+Run the new binary as:
+* Unix-like systems: `bin/gh`
+* Windows: `bin\gh`
 
-Run tests with: `make test` or `go test ./...`
+Run tests with: `go test ./...`
+
+See [project layout documentation](../docs/project-layout.md) for information on where to find specific source files.
 
 ## Submitting a pull request
 

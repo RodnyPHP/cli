@@ -5,12 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghinstance"
-	"github.com/cli/cli/internal/ghrepo"
-	"github.com/cli/cli/pkg/cmd/secret/shared"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/ghrepo"
+	"github.com/cli/cli/v2/pkg/cmd/secret/shared"
 )
 
 type SecretPayload struct {
@@ -46,14 +46,18 @@ func getPubKey(client *api.Client, host, path string) (*PubKey, error) {
 	return &pk, nil
 }
 
-func getOrgPublicKey(client *api.Client, orgName string) (*PubKey, error) {
-	host := ghinstance.OverridableDefault()
+func getOrgPublicKey(client *api.Client, host, orgName string) (*PubKey, error) {
 	return getPubKey(client, host, fmt.Sprintf("orgs/%s/actions/secrets/public-key", orgName))
 }
 
 func getRepoPubKey(client *api.Client, repo ghrepo.Interface) (*PubKey, error) {
 	return getPubKey(client, repo.RepoHost(), fmt.Sprintf("repos/%s/actions/secrets/public-key",
 		ghrepo.FullName(repo)))
+}
+
+func getEnvPubKey(client *api.Client, repo ghrepo.Interface, envName string) (*PubKey, error) {
+	return getPubKey(client, repo.RepoHost(), fmt.Sprintf("repos/%s/environments/%s/secrets/public-key",
+		ghrepo.FullName(repo), envName))
 }
 
 func putSecret(client *api.Client, host, path string, payload SecretPayload) error {
@@ -66,11 +70,10 @@ func putSecret(client *api.Client, host, path string, payload SecretPayload) err
 	return client.REST(host, "PUT", path, requestBody, nil)
 }
 
-func putOrgSecret(client *api.Client, pk *PubKey, opts SetOptions, eValue string) error {
+func putOrgSecret(client *api.Client, host string, pk *PubKey, opts SetOptions, eValue string) error {
 	secretName := opts.SecretName
 	orgName := opts.OrgName
 	visibility := opts.Visibility
-	host := ghinstance.OverridableDefault()
 
 	var repositoryIDs []int
 	var err error
@@ -92,6 +95,15 @@ func putOrgSecret(client *api.Client, pk *PubKey, opts SetOptions, eValue string
 	return putSecret(client, host, path, payload)
 }
 
+func putEnvSecret(client *api.Client, pk *PubKey, repo ghrepo.Interface, envName string, secretName, eValue string) error {
+	payload := SecretPayload{
+		EncryptedValue: eValue,
+		KeyID:          pk.ID,
+	}
+	path := fmt.Sprintf("repos/%s/environments/%s/secrets/%s", ghrepo.FullName(repo), envName, secretName)
+	return putSecret(client, repo.RepoHost(), path, payload)
+}
+
 func putRepoSecret(client *api.Client, pk *PubKey, repo ghrepo.Interface, secretName, eValue string) error {
 	payload := SecretPayload{
 		EncryptedValue: eValue,
@@ -101,14 +113,15 @@ func putRepoSecret(client *api.Client, pk *PubKey, repo ghrepo.Interface, secret
 	return putSecret(client, repo.RepoHost(), path, payload)
 }
 
+// This does similar logic to `api.RepoNetwork`, but without the overfetching.
 func mapRepoNameToID(client *api.Client, host, orgName string, repositoryNames []string) ([]int, error) {
 	queries := make([]string, 0, len(repositoryNames))
-	for _, repoName := range repositoryNames {
+	for i, repoName := range repositoryNames {
 		queries = append(queries, fmt.Sprintf(`
-			%s: repository(owner: %q, name :%q) {
+			repo_%03d: repository(owner: %q, name: %q) {
 				databaseId
 			}
-		`, repoName, orgName, repoName))
+		`, i, orgName, repoName))
 	}
 
 	query := fmt.Sprintf(`query MapRepositoryNames { %s }`, strings.Join(queries, ""))
@@ -117,24 +130,19 @@ func mapRepoNameToID(client *api.Client, host, orgName string, repositoryNames [
 		DatabaseID int `json:"databaseId"`
 	})
 
-	err := client.GraphQL(host, query, nil, &graphqlResult)
-
-	gqlErr, isGqlErr := err.(*api.GraphQLErrorResponse)
-	if isGqlErr {
-		for _, ge := range gqlErr.Errors {
-			if ge.Type == "NOT_FOUND" {
-				return nil, fmt.Errorf("could not find %s/%s", orgName, ge.Path[0])
-			}
-		}
-	}
-	if err != nil {
+	if err := client.GraphQL(host, query, nil, &graphqlResult); err != nil {
 		return nil, fmt.Errorf("failed to look up repositories: %w", err)
 	}
 
-	result := make([]int, 0, len(repositoryNames))
+	repoKeys := make([]string, 0, len(repositoryNames))
+	for k := range graphqlResult {
+		repoKeys = append(repoKeys, k)
+	}
+	sort.Strings(repoKeys)
 
-	for _, repoName := range repositoryNames {
-		result = append(result, graphqlResult[repoName].DatabaseID)
+	result := make([]int, len(repositoryNames))
+	for i, k := range repoKeys {
+		result[i] = graphqlResult[k].DatabaseID
 	}
 
 	return result, nil

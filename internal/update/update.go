@@ -3,18 +3,26 @@ package update
 import (
 	"fmt"
 	"io/ioutil"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/cli/cli/api"
-	"github.com/cli/cli/internal/ghinstance"
+	"github.com/cli/cli/v2/api"
+	"github.com/cli/cli/v2/internal/ghinstance"
 	"github.com/hashicorp/go-version"
 	"gopkg.in/yaml.v3"
 )
 
+var gitDescribeSuffixRE = regexp.MustCompile(`\d+-\d+-g[a-f0-9]{8}$`)
+
 // ReleaseInfo stores information about a release
 type ReleaseInfo struct {
-	Version string `json:"tag_name"`
-	URL     string `json:"html_url"`
+	Version     string    `json:"tag_name"`
+	URL         string    `json:"html_url"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
 type StateEntry struct {
@@ -77,12 +85,23 @@ func setStateEntry(stateFilePath string, t time.Time, r ReleaseInfo) error {
 	if err != nil {
 		return err
 	}
-	_ = ioutil.WriteFile(stateFilePath, content, 0600)
 
-	return nil
+	err = os.MkdirAll(filepath.Dir(stateFilePath), 0755)
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile(stateFilePath, content, 0600)
+	return err
 }
 
 func versionGreaterThan(v, w string) bool {
+	w = gitDescribeSuffixRE.ReplaceAllStringFunc(w, func(m string) string {
+		idx := strings.IndexRune(m, '-')
+		n, _ := strconv.Atoi(m[0:idx])
+		return fmt.Sprintf("%d-pre.0", n+1)
+	})
+
 	vv, ve := version.NewVersion(v)
 	vw, we := version.NewVersion(w)
 

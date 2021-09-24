@@ -2,13 +2,15 @@ package repo
 
 import (
 	"github.com/MakeNowJust/heredoc"
-	repoCloneCmd "github.com/cli/cli/pkg/cmd/repo/clone"
-	repoCreateCmd "github.com/cli/cli/pkg/cmd/repo/create"
-	creditsCmd "github.com/cli/cli/pkg/cmd/repo/credits"
-	repoForkCmd "github.com/cli/cli/pkg/cmd/repo/fork"
-	gardenCmd "github.com/cli/cli/pkg/cmd/repo/garden"
-	repoViewCmd "github.com/cli/cli/pkg/cmd/repo/view"
-	"github.com/cli/cli/pkg/cmdutil"
+	repoCloneCmd "github.com/cli/cli/v2/pkg/cmd/repo/clone"
+	repoCreateCmd "github.com/cli/cli/v2/pkg/cmd/repo/create"
+	creditsCmd "github.com/cli/cli/v2/pkg/cmd/repo/credits"
+	repoForkCmd "github.com/cli/cli/v2/pkg/cmd/repo/fork"
+	gardenCmd "github.com/cli/cli/v2/pkg/cmd/repo/garden"
+	repoListCmd "github.com/cli/cli/v2/pkg/cmd/repo/list"
+	repoSyncCmd "github.com/cli/cli/v2/pkg/cmd/repo/sync"
+	repoViewCmd "github.com/cli/cli/v2/pkg/cmd/repo/view"
+	"github.com/cli/cli/v2/pkg/cmdutil"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +38,8 @@ func NewCmdRepo(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(repoForkCmd.NewCmdFork(f, nil))
 	cmd.AddCommand(repoCloneCmd.NewCmdClone(f, nil))
 	cmd.AddCommand(repoCreateCmd.NewCmdCreate(f, nil))
+	cmd.AddCommand(repoListCmd.NewCmdList(f, nil))
+	cmd.AddCommand(repoSyncCmd.NewCmdSync(f, nil))
 	cmd.AddCommand(creditsCmd.NewCmdRepoCredits(f, nil))
 	cmd.AddCommand(gardenCmd.NewCmdGarden(f, nil))
 
